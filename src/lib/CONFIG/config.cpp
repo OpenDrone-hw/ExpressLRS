@@ -807,10 +807,26 @@ RxConfig::RxConfig()
 {
 }
 
+#if defined(Regulatory_Domain_EU_CE_2400)
+// EU receiver: the telemetry power can only be a level of the layout (no
+// MatchTX), so nothing stored can ask for more than the EU level.
+static uint8_t euClampRxPower(uint8_t power)
+{
+    if (power > POWERMGNT::getMaxPower())
+        return POWERMGNT::getMaxPower();
+    if (power < POWERMGNT::getMinPower())
+        return POWERMGNT::getMinPower();
+    return power;
+}
+#endif
+
 void RxConfig::Load()
 {
     m_modified = 0;
     m_eeprom->Get(0, m_config);
+#if defined(Regulatory_Domain_EU_CE_2400)
+    m_config.power = euClampRxPower(m_config.power);
+#endif
 
     uint32_t version = 0;
     if ((m_config.version & CONFIG_MAGIC_MASK) == RX_CONFIG_MAGIC)
@@ -849,6 +865,9 @@ void RxConfig::Load()
         case 10:
             UpgradeEepromV9V10(version); break;
     }
+#if defined(Regulatory_Domain_EU_CE_2400)
+    m_config.power = euClampRxPower(m_config.power);
+#endif
     m_modified = EVENT_CONFIG_MODEL_CHANGED; // anything to force write
     Commit();
 }
@@ -1190,6 +1209,9 @@ RxConfig::SetModelId(uint8_t modelId)
 void
 RxConfig::SetPower(uint8_t power)
 {
+#if defined(Regulatory_Domain_EU_CE_2400)
+    power = euClampRxPower(power);
+#endif
     if (m_config.power != power)
     {
         m_config.power = power;

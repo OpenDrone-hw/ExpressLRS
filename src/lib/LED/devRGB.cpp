@@ -8,6 +8,9 @@
 
 #include "crsf_protocol.h"
 #include "POWERMGNT.h"
+#if defined(OPENRX_LAB)
+#include "lab_runtime.h"
+#endif
 
 static uint8_t pixelCount;
 static uint8_t *statusLEDs;
@@ -401,6 +404,11 @@ static int start()
 
 static int timeout()
 {
+#if defined(OPENRX_LAB)
+    // Lab image: the LED colours of the lab procedure, section 8
+    WS281BsetLED(labLedColour(millis()));
+    return 50;
+#endif
     if (blinkyState == STARTUP && connectionState < FAILURE_STATES)
     {
         return blinkyUpdate();

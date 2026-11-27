@@ -7,6 +7,9 @@
 #include "devHandset.h"
 
 #include "CRSFEndpoint.h"
+#if defined(OPENRX_LAB)
+#include "lab_runtime.h"
+#endif
 
 #if defined(PLATFORM_ESP32)
 #include "AutoDetect.h"
@@ -16,6 +19,11 @@ Handset *handset;
 
 static bool initialize()
 {
+#if defined(OPENRX_LAB)
+    // Lab image: internal channel source and test console instead of a handset
+    handset = labTxCreateHandset();
+    return true;
+#endif
 #if defined(PLATFORM_ESP32)
     if (GPIO_PIN_RCSIGNAL_RX == GPIO_PIN_RCSIGNAL_TX)
     {

@@ -37,6 +37,13 @@
 #include "devWIFI.h"
 #include "RXEndpoint.h"
 #include "RXOTAConnector.h"
+#include "EuGuard.h"
+#if defined(EU_TLM_GUARD) && defined(PLATFORM_ESP32)
+#include <esp_timer.h>
+#endif
+#if defined(OPENRX_LAB)
+#include "lab_runtime.h"
+#endif
 #include "rx-serial/devSerialIO.h"
 
 #include <LittleFS.h>
@@ -449,6 +456,33 @@ void ICACHE_RAM_ATTR LinkStatsToOta(OTA_LinkStats_s * const ls)
     } \
 }
 
+#if defined(EU_TLM_GUARD)
+EuGuard euTlmGuard;
+
+// EU compliance guard (lib/EUGUARD): may this telemetry packet go on air on
+// the current channel?
+static bool ICACHE_RAM_ATTR euTlmGuardAllows()
+{
+    // Channel of this slot (HandleFHSS() has just hopped). Keyed on the FHSS
+    // channel index, so frequency correction never splits one channel's history.
+#if defined(RADIO_LR1121)
+    const bool subGHz = FHSSusePrimaryFreqBand; // primary band: EU868 on LR1121
+#else
+    const bool subGHz = false;
+#endif
+    const uint8_t channel = FHSSusePrimaryFreqBand ? FHSSsequence[FHSSptr] : FHSSsequence_DualBand[FHSSptr];
+    const fhss_config_t *domain = FHSSusePrimaryFreqBand ? FHSSconfig : FHSSconfigDualBand;
+    // Nominal centre frequency in Hz (only used for the 868 MHz rules; LR1121 registers are in Hz)
+    const uint32_t freqHz = domain->freq_start + (uint32_t)((uint64_t)(domain->freq_stop - domain->freq_start) * channel / (domain->freq_count - 1));
+#if defined(PLATFORM_ESP32)
+    const uint64_t now = esp_timer_get_time();
+#else
+    const uint64_t now = micros64();
+#endif
+    return euGuardTx(&euTlmGuard, now, subGHz, channel, freqHz, ExpressLRS_currAirRate_RFperfParams->TOA) == EU_GUARD_OK;
+}
+#endif
+
 bool ICACHE_RAM_ATTR HandleSendDataDl()
 {
     uint8_t modresult = OtaNonce % ExpressLRS_currTlmDenom;
@@ -537,6 +571,13 @@ bool ICACHE_RAM_ATTR HandleSendDataDl()
         {
             transmittingRadio = Radio.GetStrongestReceivingRadio(); // Pick the radio with best rf connection to the tx.
         }
+#if defined(EU_TLM_GUARD)
+        // Skipped like an LBT refusal: the radio stays in receive
+        if (transmittingRadio != SX12XX_Radio_NONE && !euTlmGuardAllows())
+        {
+            transmittingRadio = SX12XX_Radio_NONE;
+        }
+#endif
     }
 
     // Gemini flips frequencies between radios on the rx side only.  This is to help minimise antenna cross polarization.
@@ -1239,6 +1280,13 @@ void DataUlReceiveComplete()
 
 static void setupSerial()
 {
+#if defined(OPENRX_LAB)
+    // UART0 carries the lab test console instead of CRSF to a flight controller
+    BackpackOrLogStrm = new NullStream();
+    serialIO = new SerialNOOP();
+    labRxSetupSerial();
+    return;
+#endif
     bool sbusSerialOutput = false;
 	bool sumdSerialOutput = false;
     bool mavlinkSerialOutput = false;
@@ -1500,6 +1548,15 @@ static void setupConfigAndPocCheck()
     config.SetStorageProvider(&eeprom); // Pass pointer to the Config class for access to storage
     config.Load();
 
+#if defined(OPENRX_LAB)
+    // Lab samples are power cycled often: never enter binding mode by plug cycles
+    if (config.GetPowerOnCounter() != 0)
+    {
+        config.SetPowerOnCounter(0);
+        config.Commit();
+    }
+    return;
+#endif
     // If bound, track number of plug/unplug cycles to go to binding mode in eeprom
     if (config.GetIsBound() && config.GetPowerOnCounter() < 3)
     {
@@ -1962,6 +2019,9 @@ void setup()
         devicesInit();
 
         setConnectionState(hardwareUndefined);
+#if defined(OPENRX_LAB)
+        labRxSetupSerial();
+#endif
     }
     else
     {
@@ -2015,7 +2075,12 @@ void setup()
 
         setupRadio();
 
+#if defined(OPENRX_LAB)
+        // Idle after power-up: the receiver starts only for "link rx"
+        if (connectionState != radioFailed && labRxBootLink())
+#else
         if (connectionState != radioFailed)
+#endif
         {
             // RFnoiseFloor = MeasureNoiseFloor(); //TODO move MeasureNoiseFloor to driver libs
             // DBGLN("RF noise floor: %d dBm", RFnoiseFloor);
@@ -2034,6 +2099,9 @@ void setup()
     // setup() eats up some of this time, which can cause the first mode connection to fail.
     // Resetting the time here give the first mode a better chance of connection.
     RFmodeLastCycled = millis();
+#if defined(OPENRX_LAB)
+    labRxBegin();
+#endif
 }
 
 #if defined(PLATFORM_ESP32_C3)
@@ -2061,6 +2129,14 @@ void loop()
 
     CheckConfigChangePending();
     executeDeferredFunction(micros());
+
+#if defined(OPENRX_LAB)
+    // Test console; outside "link rx" the receiver state machine stays off
+    if (labRxLoop(now))
+    {
+        return;
+    }
+#endif
 
     if (connectionState > MODE_STATES)
     {

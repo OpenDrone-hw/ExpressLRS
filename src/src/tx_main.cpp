@@ -1,4 +1,7 @@
 #include "rxtx_common.h"
+#if defined(OPENRX_LAB)
+#include "lab_runtime.h"
+#endif
 
 #include "CRSFHandset.h"
 #include "CRSFParameters.h"
@@ -17,7 +20,9 @@
 #include "devVTX.h"
 #if defined(PLATFORM_ESP32)
 #include "devScreen.h"
+#if !defined(OPENRX_LAB)
 #include "devBLE.h"
+#endif
 #include "devGsensor.h"
 #include "devThermal.h"
 #include "devPDET.h"
@@ -108,7 +113,9 @@ device_affinity_t ui_devices[] = {
   {&Button_device, 0},
 #if defined(PLATFORM_ESP32)
   {&Backpack_device, 0},
+#if !defined(OPENRX_LAB)
   {&BLE_device, 0},
+#endif
 #if !defined(PLATFORM_ESP32_C3)
   {&Screen_device, 0},
   {&Gsensor_device, 0},
@@ -1408,6 +1415,10 @@ static void checkSendLinkStatsToHandset(uint32_t now)
 
 void setup()
 {
+#if defined(OPENRX_LAB)
+  // Lab image, transmitter application: runs only for "link tx"
+  labTxBootCheck();
+#endif
   if (setupHardwareFromOptions())
   {
     setupTarget();
@@ -1434,6 +1445,9 @@ void setup()
     eeprom.Begin(); // Init the eeprom
     config.SetStorageProvider(&eeprom); // Pass pointer to the Config class for access to storage
     config.Load(); // Load the stored values from eeprom
+#if defined(OPENRX_LAB)
+    labTxApplyConfig();
+#endif
 
     Radio.currFreq = FHSSgetInitialFreq(); //set frequency first or an error will occur!!!
     #if defined(RADIO_SX127X)

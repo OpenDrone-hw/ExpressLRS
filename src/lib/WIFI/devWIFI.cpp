@@ -93,6 +93,29 @@ static uint32_t totalSize;
 
 static const char VERSION[] = {LATEST_VERSION, 0};
 
+// Wi-Fi (configuration access point and station) output power. OpenDrone EU
+// products: 8.5 dBm, about 9 dBm e.i.r.p. with the 0.5 dBi chip antenna.
+#define WIFI_TX_POWER WIFI_POWER_8_5dBm
+
+#if defined(OPENRX_LAB)
+#include "lab_runtime.h"
+#endif
+
+// Access point started, and every setTxPower() call on the way succeeded
+volatile bool wifiApStarted = false;
+volatile bool wifiApPowerSetOk = false;
+
+// Wi-Fi may start: in the lab image only on the "wifi" command, never on
+// its own (radio fault, missing layout, button, auto interval, MSP)
+static bool wifiAllowed()
+{
+#if defined(OPENRX_LAB)
+  return labWifiRequested();
+#else
+  return true;
+#endif
+}
+
 void setWifiUpdateMode()
 {
   // No need to ExitBindingMode(), the radio will be stopped stopped when start the Wifi service.
@@ -168,7 +191,7 @@ static void WebUpdateHandleRoot(AsyncWebServerRequest *request)
   }
 }
 
-static void putFile(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+[[maybe_unused]] static void putFile(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
 {
   static File file;
   static size_t bytes;
@@ -231,7 +254,7 @@ static void HandleReset(AsyncWebServerRequest *request)
   rebootTime = millis() + 100;
 }
 
-static void UpdateSettings(AsyncWebServerRequest *request, JsonVariant &json)
+[[maybe_unused]] static void UpdateSettings(AsyncWebServerRequest *request, JsonVariant &json)
 {
   if (firmwareOptions.flash_discriminator != json["flash-discriminator"].as<uint32_t>()) {
     request->send(409, "text/plain", "Mismatched device identifier, refresh the page and try again.");
@@ -1120,7 +1143,12 @@ static void startServices()
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
 
+#if defined(Regulatory_Domain_EU_CE_2400)
+  // EU build: the layout (power table) cannot be replaced in the field
+  server.on("/hardware.json", HTTP_GET, getFile);
+#else
   server.on("/hardware.json", HTTP_GET | HTTP_POST, getFile, nullptr, putFile);
+#endif
   server.on("/options.json", HTTP_GET, getFile);
   server.on("/reboot", HandleReboot);
   server.on("/reset", HandleReset);
@@ -1129,7 +1157,10 @@ static void startServices()
   #endif
 
   server.addHandler(new AsyncCallbackJsonWebHandler("/config", UpdateConfiguration));
+#if !defined(Regulatory_Domain_EU_CE_2400)
+  // EU build: options (regulatory domain, binding, Wi-Fi) cannot be changed in the field
   server.addHandler(new AsyncCallbackJsonWebHandler("/options.json", UpdateSettings));
+#endif
   #if defined(TARGET_TX)
     server.addHandler(new AsyncCallbackJsonWebHandler("/buttons", WebUpdateButtonColors));
     auto *handler = new AsyncCallbackJsonWebHandler("/import", ImportConfiguration);
@@ -1199,6 +1230,13 @@ static void HandleWebUpdate()
         wifiMode = WIFI_AP;
         #if defined(PLATFORM_ESP32)
         WiFi.setHostname(wifi_hostname); // hostname must be set before the mode is set to STA
+        // arduino-esp32 2.0.17: mode() calls esp_wifi_start(), and an AP
+        // beacons from that moment; esp_wifi_set_max_tx_power() only works
+        // after start. So start as a station first (a station sends nothing
+        // until it scans or connects), limit the power, then switch the
+        // running driver to AP mode with the limit already in place.
+        WiFi.mode(WIFI_STA);
+        wifiApPowerSetOk = WiFi.setTxPower(WIFI_TX_POWER);
         #endif
         WiFi.mode(wifiMode);
         #if defined(PLATFORM_ESP8266)
@@ -1209,10 +1247,11 @@ static void HandleWebUpdate()
         WiFi.setOutputPower(13.5);
         WiFi.setPhyMode(WIFI_PHY_MODE_11N);
         #elif defined(PLATFORM_ESP32)
-        WiFi.setTxPower(WIFI_POWER_19_5dBm);
+        wifiApPowerSetOk = WiFi.setTxPower(WIFI_TX_POWER) && wifiApPowerSetOk;
         #endif
         WiFi.softAPConfig(ipAddress, ipAddress, netMsk);
         WiFi.softAP(wifi_ap_ssid, wifi_ap_password);
+        wifiApStarted = true;
         startServices();
         break;
       case WIFI_STA:
@@ -1230,7 +1269,7 @@ static void HandleWebUpdate()
         WiFi.setOutputPower(13.5);
         WiFi.setPhyMode(WIFI_PHY_MODE_11N);
         #elif defined(PLATFORM_ESP32)
-        WiFi.setTxPower(WIFI_POWER_19_5dBm);
+        WiFi.setTxPower(WIFI_TX_POWER);
         WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
         WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
         #endif
@@ -1274,6 +1313,10 @@ static int start()
 
 static int event()
 {
+  if (!wifiAllowed())
+  {
+    return DURATION_IGNORE;
+  }
   if (connectionState == wifiUpdate || connectionState > FAILURE_STATES)
   {
     if (!wifiStarted) {
@@ -1295,6 +1338,10 @@ static int event()
 
 static int timeout()
 {
+  if (!wifiAllowed())
+  {
+    return DURATION_NEVER;
+  }
   if (wifiStarted)
   {
     HandleWebUpdate();
