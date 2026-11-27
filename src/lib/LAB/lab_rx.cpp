@@ -11,6 +11,14 @@
 #include "EuGuard.h"
 
 #include <esp_timer.h>
+#include <WiFi.h>
+
+// Production access point power (devWIFI.cpp WIFI_TX_POWER), driver units of 0.25 dBm
+static constexpr int LAB_WIFI_POWER = WIFI_POWER_8_5dBm;
+extern volatile bool wifiApStarted;   // devWIFI.cpp
+extern volatile bool wifiApPowerSetOk;
+static uint32_t wifiStartMs;
+static bool wifiReported;
 
 extern uint8_t getLq();
 extern void setWifiUpdateMode();
@@ -283,8 +291,9 @@ static void execute(const char *line)
         // The production access point, exactly as the EU build starts it
         // (devWIFI.cpp: SSID, password, 8.5 dBm); "stop" restarts to idle
         labState = LAB_STATE_WIFI;
-        Serial.printf("OK wifi access point, power 8.5dBm\r\n");
-        setWifiUpdateMode();
+        wifiStartMs = millis();
+        wifiReported = false;
+        setWifiUpdateMode(); // the OK line follows once the access point runs
         return;
     default:
         if (radioOk())
@@ -310,6 +319,11 @@ void labRxBegin()
         // command with "ERR radio not found" instead of restarting again
         labSetResumeMode("");
     }
+    if (pendingValid && strcmp(pendingLine, LAB_RESUME_STOPPED_LINE) == 0)
+    {
+        pendingValid = false;
+        labResumeStopped = true;
+    }
     if (pendingValid)
     {
         pendingValid = false;
@@ -317,10 +331,35 @@ void labRxBegin()
         return;
     }
     Serial.printf("\r\n%s\r\n", LAB_BANNER);
+    if (labResumeStopped)
+        labPrintErr(LAB_RESUME_STOPPED_ERR);
     if (connectionState == radioFailed)
         labPrintErr("radio not found");
     else if (connectionState == hardwareUndefined)
         labPrintErr("hardware layout missing");
+}
+
+// Read the access point's power back from the driver (0.25 dBm units)
+static void reportWifi(uint32_t now)
+{
+    if (wifiReported)
+        return;
+    if (!wifiApStarted)
+    {
+        if (now - wifiStartMs > 5000)
+        {
+            wifiReported = true;
+            labPrintErr("wifi access point did not start");
+        }
+        return;
+    }
+    wifiReported = true;
+    const int power = WiFi.getTxPower();
+    if (wifiApPowerSetOk && power == LAB_WIFI_POWER)
+        Serial.printf("OK wifi access point, power 8.5dBm\r\n");
+    else
+        Serial.printf("ERR wifi power %d.%02ddBm%s\r\n", power / 4, (power % 4) * 25,
+            wifiApPowerSetOk ? "" : " (setTxPower failed)");
 }
 
 static void reportLink(uint32_t now)
@@ -357,6 +396,7 @@ bool labRxLoop(uint32_t now)
     char line[LAB_LINE_MAX + 1];
     if (labReadLine(line, sizeof(line)))
         execute(line);
+    labResumeStableCheck(now);
 
     if (labState == LAB_STATE_LINK_RX)
     {
@@ -364,7 +404,10 @@ bool labRxLoop(uint32_t now)
         return false; // run the normal receiver
     }
     if (labState == LAB_STATE_WIFI)
+    {
+        reportWifi(now);
         return true;
+    }
 
     if (labState == LAB_STATE_RX && now - lastReportMs >= 1000)
     {

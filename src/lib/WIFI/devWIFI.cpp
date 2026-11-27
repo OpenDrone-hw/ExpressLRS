@@ -101,6 +101,10 @@ static const char VERSION[] = {LATEST_VERSION, 0};
 #include "lab_runtime.h"
 #endif
 
+// Access point started, and every setTxPower() call on the way succeeded
+volatile bool wifiApStarted = false;
+volatile bool wifiApPowerSetOk = false;
+
 // Wi-Fi may start: in the lab image only on the "wifi" command, never on
 // its own (radio fault, missing layout, button, auto interval, MSP)
 static bool wifiAllowed()
@@ -1232,7 +1236,7 @@ static void HandleWebUpdate()
         // until it scans or connects), limit the power, then switch the
         // running driver to AP mode with the limit already in place.
         WiFi.mode(WIFI_STA);
-        WiFi.setTxPower(WIFI_TX_POWER);
+        wifiApPowerSetOk = WiFi.setTxPower(WIFI_TX_POWER);
         #endif
         WiFi.mode(wifiMode);
         #if defined(PLATFORM_ESP8266)
@@ -1243,10 +1247,11 @@ static void HandleWebUpdate()
         WiFi.setOutputPower(13.5);
         WiFi.setPhyMode(WIFI_PHY_MODE_11N);
         #elif defined(PLATFORM_ESP32)
-        WiFi.setTxPower(WIFI_TX_POWER);
+        wifiApPowerSetOk = WiFi.setTxPower(WIFI_TX_POWER) && wifiApPowerSetOk;
         #endif
         WiFi.softAPConfig(ipAddress, ipAddress, netMsk);
         WiFi.softAP(wifi_ap_ssid, wifi_ap_password);
+        wifiApStarted = true;
         startServices();
         break;
       case WIFI_STA:

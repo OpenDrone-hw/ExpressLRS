@@ -145,6 +145,40 @@ void labMailboxPut(const char *line)
     }
 }
 
+// Automatic resumes in a row; survives resets, not power-up. A crash loop
+// stops after LAB_RESUME_MAX resumes without LAB_RESUME_STABLE_MS of running.
+static constexpr uint32_t LAB_RESUME_MAGIC = 0x4C52534D;
+static constexpr uint32_t LAB_RESUME_MAX = 3;
+static constexpr uint32_t LAB_RESUME_STABLE_MS = 10000;
+struct LabResumeCount
+{
+    uint32_t magic;
+    uint32_t count;
+    uint32_t check; // ~count
+};
+static RTC_NOINIT_ATTR LabResumeCount resumeCount;
+bool labResumeStopped;
+
+static uint32_t resumeCountGet()
+{
+    if (resumeCount.magic != LAB_RESUME_MAGIC || resumeCount.check != ~resumeCount.count)
+        return 0; // power-up, or memory used by the other application
+    return resumeCount.count;
+}
+
+static void resumeCountSet(uint32_t n)
+{
+    resumeCount.magic = LAB_RESUME_MAGIC;
+    resumeCount.count = n;
+    resumeCount.check = ~n;
+}
+
+void labResumeStableCheck(uint32_t nowMs)
+{
+    if (nowMs >= LAB_RESUME_STABLE_MS && resumeCountGet() != 0)
+        resumeCountSet(0);
+}
+
 bool labBootCommand(char *line, size_t len)
 {
     line[0] = '\0';
@@ -158,19 +192,35 @@ bool labBootCommand(char *line, size_t len)
     String use;
     switch (esp_reset_reason())
     {
-    case ESP_RST_SW: // our own restart: the stored command
+    case ESP_RST_SW: // a restart by the lab code carries the stored command
         use = cmd;
+        // The lab code clears the resume mode before it restarts and the next
+        // link mode sets it again; any other software restart must not resume
+        if (mode.length())
+            p.remove(NVS_MODE);
+        resumeCountSet(0);
         break;
     case ESP_RST_BROWNOUT: // supply dip, ESD, watchdog, crash: resume the link
     case ESP_RST_PANIC:
     case ESP_RST_INT_WDT:
     case ESP_RST_TASK_WDT:
     case ESP_RST_WDT:
+        if (mode.length() == 0)
+            break;
+        if (resumeCountGet() >= LAB_RESUME_MAX)
+        {
+            p.remove(NVS_MODE);
+            resumeCountSet(0);
+            labResumeStopped = true;
+            break;
+        }
+        resumeCountSet(resumeCountGet() + 1);
         use = mode;
         break;
     default: // power-up, reset pin, unknown: idle
         if (mode.length())
             p.remove(NVS_MODE);
+        resumeCountSet(0);
         break;
     }
     p.end();

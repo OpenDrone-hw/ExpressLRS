@@ -40,6 +40,8 @@ void labTxBootCheck()
     {
         if (have)
             labMailboxPut(line);
+        else if (labResumeStopped)
+            labMailboxPut(LAB_RESUME_STOPPED_LINE); // the receiver prints the error
         esp_restart();
     }
     // No receiver application: stay here, idle (LabHandset never connects)
@@ -98,6 +100,7 @@ public:
         char line[LAB_LINE_MAX + 1];
         if (labReadLine(line, sizeof(line)))
             execute(line);
+        labResumeStableCheck(millis());
         report();
     }
 

@@ -51,6 +51,10 @@ void labMailboxPut(const char *line);
 // last link mode after a brownout/watchdog/panic reset, nothing at power-up
 bool labBootCommand(char *line, size_t len);
 void labSetResumeMode(const char *line); // "" clears
+extern bool labResumeStopped;            // set by labBootCommand() after a crash loop
+void labResumeStableCheck(uint32_t nowMs); // call from the loop: resets the resume count
+#define LAB_RESUME_STOPPED_LINE "!resume-stopped"
+#define LAB_RESUME_STOPPED_ERR "resume stopped after 3 resets"
 bool labWifiRequested();
 bool labSelectApp(bool txApp);
 // Store the command and restart into the application; returns only on failure
