@@ -250,7 +250,7 @@ static void HandleReset(AsyncWebServerRequest *request)
   rebootTime = millis() + 100;
 }
 
-static void UpdateSettings(AsyncWebServerRequest *request, JsonVariant &json)
+[[maybe_unused]] static void UpdateSettings(AsyncWebServerRequest *request, JsonVariant &json)
 {
   if (firmwareOptions.flash_discriminator != json["flash-discriminator"].as<uint32_t>()) {
     request->send(409, "text/plain", "Mismatched device identifier, refresh the page and try again.");
@@ -1153,7 +1153,10 @@ static void startServices()
   #endif
 
   server.addHandler(new AsyncCallbackJsonWebHandler("/config", UpdateConfiguration));
+#if !defined(Regulatory_Domain_EU_CE_2400)
+  // EU build: options (regulatory domain, binding, Wi-Fi) cannot be changed in the field
   server.addHandler(new AsyncCallbackJsonWebHandler("/options.json", UpdateSettings));
+#endif
   #if defined(TARGET_TX)
     server.addHandler(new AsyncCallbackJsonWebHandler("/buttons", WebUpdateButtonColors));
     auto *handler = new AsyncCallbackJsonWebHandler("/import", ImportConfiguration);
