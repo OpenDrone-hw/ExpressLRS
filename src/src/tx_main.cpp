@@ -1,4 +1,7 @@
 #include "rxtx_common.h"
+#if defined(OPENRX_LAB)
+#include "lab_runtime.h"
+#endif
 
 #include "CRSFHandset.h"
 #include "CRSFParameters.h"
@@ -1408,6 +1411,10 @@ static void checkSendLinkStatsToHandset(uint32_t now)
 
 void setup()
 {
+#if defined(OPENRX_LAB)
+  // Lab image, transmitter application: runs only for "link tx"
+  labTxBootCheck();
+#endif
   if (setupHardwareFromOptions())
   {
     setupTarget();
@@ -1434,6 +1441,9 @@ void setup()
     eeprom.Begin(); // Init the eeprom
     config.SetStorageProvider(&eeprom); // Pass pointer to the Config class for access to storage
     config.Load(); // Load the stored values from eeprom
+#if defined(OPENRX_LAB)
+    labTxApplyConfig();
+#endif
 
     Radio.currFreq = FHSSgetInitialFreq(); //set frequency first or an error will occur!!!
     #if defined(RADIO_SX127X)

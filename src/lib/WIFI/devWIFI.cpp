@@ -93,6 +93,10 @@ static uint32_t totalSize;
 
 static const char VERSION[] = {LATEST_VERSION, 0};
 
+// Wi-Fi (configuration access point and station) output power. OpenDrone EU
+// products: 8.5 dBm, about 9 dBm e.i.r.p. with the 0.5 dBi chip antenna.
+#define WIFI_TX_POWER WIFI_POWER_8_5dBm
+
 void setWifiUpdateMode()
 {
   // No need to ExitBindingMode(), the radio will be stopped stopped when start the Wifi service.
@@ -1209,7 +1213,7 @@ static void HandleWebUpdate()
         WiFi.setOutputPower(13.5);
         WiFi.setPhyMode(WIFI_PHY_MODE_11N);
         #elif defined(PLATFORM_ESP32)
-        WiFi.setTxPower(WIFI_POWER_19_5dBm);
+        WiFi.setTxPower(WIFI_TX_POWER);
         #endif
         WiFi.softAPConfig(ipAddress, ipAddress, netMsk);
         WiFi.softAP(wifi_ap_ssid, wifi_ap_password);
@@ -1230,7 +1234,7 @@ static void HandleWebUpdate()
         WiFi.setOutputPower(13.5);
         WiFi.setPhyMode(WIFI_PHY_MODE_11N);
         #elif defined(PLATFORM_ESP32)
-        WiFi.setTxPower(WIFI_POWER_19_5dBm);
+        WiFi.setTxPower(WIFI_TX_POWER);
         WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
         WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
         #endif
