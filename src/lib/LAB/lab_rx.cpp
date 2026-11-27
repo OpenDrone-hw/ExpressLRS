@@ -13,6 +13,7 @@
 #include <esp_timer.h>
 
 extern uint8_t getLq();
+extern void setWifiUpdateMode();
 #if defined(EU_TLM_GUARD)
 extern EuGuard euTlmGuard;
 #endif
@@ -36,6 +37,7 @@ static volatile uint32_t txSeq;
 static volatile bool txBusy;
 static volatile uint32_t lastTxDoneMs;
 static esp_timer_handle_t refTimer;
+static volatile bool refInTick;
 static LabPerCounter per;
 static portMUX_TYPE perMux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t lastReportMs;
@@ -48,7 +50,7 @@ static void readMailboxOnce()
     if (mailboxRead)
         return;
     mailboxRead = true;
-    pendingValid = labMailboxTake(pendingLine, sizeof(pendingLine));
+    pendingValid = labBootCommand(pendingLine, sizeof(pendingLine));
 }
 
 void labRxSetupSerial()
@@ -67,6 +69,7 @@ bool labRxBootLink()
         return false;
     pendingValid = false;
     labState = LAB_STATE_LINK_RX;
+    labSetResumeMode("link rx"); // resume after a brownout or watchdog reset
     return true;
 }
 
@@ -158,16 +161,21 @@ static bool ICACHE_RAM_ATTR labRxDone(SX12xxDriverCommon::rx_status status)
 
 static void refTick(void *)
 {
+    refInTick = true;
     if (labState == LAB_STATE_REF && !txBusy)
         sendNext();
+    refInTick = false;
 }
 
 static void stopTestMode()
 {
+    const LabState was = labState;
+    labState = LAB_STATE_IDLE; // refTick and labTxDone stop sending from here
     if (refTimer)
         esp_timer_stop(refTimer);
-    const LabState was = labState;
-    labState = LAB_STATE_IDLE;
+    // esp_timer_stop() does not wait for a callback that is already running
+    while (refInTick)
+        delay(1);
     Radio.TXdoneCallback = SX12xxDriverCommon::nullCallbackTx;
     Radio.RXdoneCallback = SX12xxDriverCommon::nullCallbackRx;
     if (was != LAB_STATE_IDLE)
@@ -250,12 +258,14 @@ static void execute(const char *line)
         break;
     }
 
-    // Leaving the receiver link: restart, the stored command runs after boot
-    if (labState == LAB_STATE_LINK_RX)
+    // Leaving the receiver link or Wi-Fi: restart, the stored command runs after boot
+    if (labState == LAB_STATE_LINK_RX || labState == LAB_STATE_WIFI)
     {
         labRestartWith(c.type == LAB_CMD_STOP ? "stop" : line, c.type == LAB_CMD_LINK_TX);
         return;
     }
+    if ((c.type == LAB_CMD_LINK_RX || c.type == LAB_CMD_LINK_TX) && !radioOk())
+        return;
 
     stopTestMode();
     switch (c.type)
@@ -268,6 +278,13 @@ static void execute(const char *line)
         return;
     case LAB_CMD_LINK_RX:
         labRestartWith(line, false);
+        return;
+    case LAB_CMD_WIFI:
+        // The production access point, exactly as the EU build starts it
+        // (devWIFI.cpp: SSID, password, 8.5 dBm); "stop" restarts to idle
+        labState = LAB_STATE_WIFI;
+        Serial.printf("OK wifi access point, power 8.5dBm\r\n");
+        setWifiUpdateMode();
         return;
     default:
         if (radioOk())
@@ -287,6 +304,12 @@ void labRxBegin()
     const bool radioPresent = connectionState != radioFailed && connectionState != hardwareUndefined;
     if (radioPresent)
         radioStandby();
+    if (!radioPresent)
+    {
+        // Radio missing: nothing resumes, and execute() answers a stored link
+        // command with "ERR radio not found" instead of restarting again
+        labSetResumeMode("");
+    }
     if (pendingValid)
     {
         pendingValid = false;
@@ -340,6 +363,8 @@ bool labRxLoop(uint32_t now)
         reportLink(now);
         return false; // run the normal receiver
     }
+    if (labState == LAB_STATE_WIFI)
+        return true;
 
     if (labState == LAB_STATE_RX && now - lastReportMs >= 1000)
     {

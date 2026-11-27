@@ -49,6 +49,7 @@ enum LabCmdType : uint8_t
     LAB_CMD_REF,
     LAB_CMD_LINK_TX,
     LAB_CMD_LINK_RX,
+    LAB_CMD_WIFI,
 };
 
 struct LabRate

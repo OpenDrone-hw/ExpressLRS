@@ -12,15 +12,17 @@
  *   any 225 ms (N = 15). Budget used here: 12 ms.
  *
  * 868 MHz, EN 300 220-2 V3.3.1 (Annex B bands):
- *   - no transmission on a channel whose occupied band (500 kHz) leaves
- *     863.0 to 868.6 MHz, which keeps clear of 868.6-868.7, 869.2-869.4 and
- *     869.65-869.7 MHz and of every band edge above 865 MHz;
- *   - duty cycle 1 % per hour in 865.0 to 868.6 MHz, 0.1 % per hour in 863.0
+ *   - transmission only on channels whose occupied band (500 kHz) lies inside
+ *     863.1 to 868.0 MHz: 100 kHz clear of the 863.0 MHz band edge, not
+ *     straddling 868.0 MHz, clear of 868.6-868.7, 869.2-869.4, 869.65-869.7.
+ *     In the EU868 plan these are channels 1 to 8 (863.800 to 867.475 MHz);
+ *   - duty cycle 1 % per hour in 865.0 to 868.0 MHz, 0.1 % per hour in 863.0
  *     to 865.0 MHz (a channel straddling 865.0 MHz counts as 0.1 %).
- *   Duty cycle is enforced by one token bucket per band. Over any window of T
- *   seconds the airtime is at most capacity + rate * T, so with the values
- *   below one hour holds at most 0.36 s + 0.9 % * 3600 s = 32.76 s (limit
- *   36 s) and 3.276 s (limit 3.6 s).
+ *   Duty cycle is enforced by one token bucket per band, empty at boot so a
+ *   power cycle cannot add budget. Over any window of T seconds the airtime is
+ *   at most capacity + rate * T, so one hour holds at most
+ *   0.36 s + 0.9 % * 3600 s = 32.76 s (limit 36 s) and 3.276 s (limit 3.6 s).
+ *   The budget does not survive a reset: a reset only removes budget.
  *
  * Every limit is one named constant below. The guard is compiled into every
  * EU build (Regulatory_Domain_EU_CE_2400); EU_TLM_GUARD_DISABLE removes it.
@@ -41,8 +43,10 @@ constexpr size_t EU2G4_HISTORY_LEN = 128;           // > max telemetry packets i
 
 // ---- EN 300 220-2, 868 MHz ----
 constexpr uint32_t EU868_OCCUPIED_BW_HZ = 500000;   // LoRa BW500; GFSK 300 kbit/s is narrower
-constexpr uint32_t EU868_ALLOWED_LOW_HZ = 863000000;
-constexpr uint32_t EU868_ALLOWED_HIGH_HZ = 868600000;
+constexpr uint32_t EU868_BAND_LOW_HZ = 863000000;
+constexpr uint32_t EU868_EDGE_GUARD_HZ = 100000;        // distance kept from the 863.0 MHz edge
+constexpr uint32_t EU868_ALLOWED_LOW_HZ = EU868_BAND_LOW_HZ + EU868_EDGE_GUARD_HZ;
+constexpr uint32_t EU868_ALLOWED_HIGH_HZ = 868000000;   // top of the 865-868 MHz 1 % band
 constexpr uint32_t EU868_DUTY_0P1_BELOW_HZ = 865000000; // any part below: 0.1 % band
 constexpr uint32_t EU868_RULES_LOW_HZ = 862000000;      // the 868 rules apply to
 constexpr uint32_t EU868_RULES_HIGH_HZ = 876000000;     // frequencies in this range
@@ -102,7 +106,7 @@ void euGuardReset(EuGuard *g);
  * Decide on one telemetry packet and record it when allowed.
  * @param nowUs     monotonic time, 64-bit, at the start of the transmission
  * @param subGHz    true for the 868 band (freqHz must then be the frequency in Hz)
- * @param freqKey   unique per hopping channel (2.4 GHz: the radio frequency register)
+ * @param freqKey   unique per hopping channel (the FHSS channel index)
  * @param freqHz    centre frequency in Hz (only used when subGHz)
  * @param airtimeUs time on air of the packet
  */

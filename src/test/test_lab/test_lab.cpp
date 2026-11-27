@@ -33,6 +33,8 @@ void test_parse_simple(void)
     TEST_ASSERT_EQUAL(LAB_CMD_ERR, parse("stop now").type);
     TEST_ASSERT_EQUAL(LAB_CMD_ERR, parse("hello").type);
     TEST_ASSERT_EQUAL(LAB_CMD_LINK_RX, parse("link rx").type);
+    TEST_ASSERT_EQUAL(LAB_CMD_WIFI, parse("wifi").type);
+    TEST_ASSERT_EQUAL(LAB_CMD_ERR, parse("wifi on").type);
 }
 
 void test_parse_cw(void)
@@ -62,13 +64,22 @@ void test_parse_cw(void)
     TEST_ASSERT_EQUAL(LAB_BAND_868, c.band);
     TEST_ASSERT_EQUAL(6, c.channel);
     TEST_ASSERT_EQUAL(LAB_CMD_ERR, parse("cw 868 13", LAB_MODEL_LR1121).type);
-    // 868 high is the highest channel the EU build transmits on: 868.000 MHz
+    // 868 low/high are the lowest/highest channels the EU build transmits on
     c = parse("cw 868 high", LAB_MODEL_LR1121);
     TEST_ASSERT_EQUAL(LAB_CMD_CW, c.type);
-    TEST_ASSERT_EQUAL(9, c.channel);
-    TEST_ASSERT_EQUAL_UINT32(868000000UL, labChannelHz(LAB_BAND_868, c.channel));
-    // 868.525, 869.050, 869.575 MHz: no transmit test modes, receive is fine
-    for (int ch = 10; ch <= 12; ch++)
+    TEST_ASSERT_EQUAL(8, c.channel);
+    TEST_ASSERT_EQUAL_UINT32(867475000UL, labChannelHz(LAB_BAND_868, c.channel));
+    c = parse("cw 868 low", LAB_MODEL_LR1121);
+    TEST_ASSERT_EQUAL(LAB_CMD_CW, c.type);
+    TEST_ASSERT_EQUAL(1, c.channel);
+    TEST_ASSERT_EQUAL_UINT32(863800000UL, labChannelHz(LAB_BAND_868, c.channel));
+    TEST_ASSERT_TRUE(labChannelTxAllowed(LAB_BAND_868, 6)); // mid 866.425
+    // 2.4 GHz low/high unchanged
+    TEST_ASSERT_EQUAL(0, parse("cw 2g4 low", LAB_MODEL_LR1121).channel);
+    TEST_ASSERT_EQUAL(79, parse("cw 2g4 high", LAB_MODEL_LR1121).channel);
+    // 863.275, 868.000, 868.525, 869.050, 869.575 MHz: no transmit test modes, receive is fine
+    const int noTx[] = {0, 9, 10, 11, 12};
+    for (int ch : noTx)
     {
         char line[32];
         snprintf(line, sizeof(line), "tx 868 %d lora", ch);
@@ -112,6 +123,8 @@ void test_parse_link(void)
     TEST_ASSERT_EQUAL(2, c.tlm);
 
     TEST_ASSERT_EQUAL(LAB_CMD_LINK_TX, parse("link tx flrc1000 128").type);
+    TEST_ASSERT_EQUAL(RATE_LORA_2G4_150HZ, parse("link tx lora150 2").rate->enumRate);
+    TEST_ASSERT_EQUAL(RATE_LORA_2G4_100HZ_8CH, parse("link tx lora100full 16", LAB_MODEL_LR1121).rate->enumRate);
     TEST_ASSERT_EQUAL(LAB_CMD_ERR, parse("link tx flrc1000 4").type);
     TEST_ASSERT_EQUAL(LAB_CMD_ERR, parse("link tx gfsk1000 2").type);
     TEST_ASSERT_EQUAL(LAB_CMD_ERR, parse("link tx lora500").type);
@@ -135,7 +148,7 @@ void test_rate_lookup(void)
 {
     size_t n;
     const LabRate *t = labRateTable(&n);
-    TEST_ASSERT_EQUAL(9, n);
+    TEST_ASSERT_EQUAL(11, n);
     for (size_t i = 0; i < n; i++)
     {
         TEST_ASSERT_EQUAL_PTR(&t[i], labRateByName(t[i].name));

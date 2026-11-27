@@ -61,6 +61,11 @@ static void handlePress(uint8_t button, bool longPress, uint8_t count)
 
 static bool initialize()
 {
+#if defined(OPENRX_LAB)
+    // Lab image: the BOOT pad (GPIO9 button on Mono) has no actions: no bind
+    // at 1.5 s, no Wi-Fi at 5 s, no reset at 12 s
+    return false;
+#endif
     return GPIO_PIN_BUTTON != UNDEF_PIN || GPIO_PIN_BUTTON2 != UNDEF_PIN;
 }
 

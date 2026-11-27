@@ -13,6 +13,8 @@
 static const LabRate rates[] = {
     {"lora50",      RATE_LORA_2G4_50HZ,      MASK_SX1281 | MASK_LR1121, true},
     {"lora500",     RATE_LORA_2G4_500HZ,     MASK_SX1281 | MASK_LR1121, true},
+    {"lora150",     RATE_LORA_2G4_150HZ,     MASK_SX1281 | MASK_LR1121, true},
+    {"lora100full", RATE_LORA_2G4_100HZ_8CH, MASK_SX1281 | MASK_LR1121, true},
     {"flrc500",     RATE_FLRC_2G4_500HZ,     MASK_SX1281,               true},
     {"flrc1000",    RATE_FLRC_2G4_1000HZ,    MASK_SX1281,               true},
     {"gfsk1000",    RATE_FSK_2G4_1000HZ,     MASK_LR1121,               true},
@@ -171,12 +173,17 @@ static bool parseChannel(const char *t, LabCmd *out)
 {
     const uint8_t count = labChannelCount(out->band);
     if (strcmp(t, "low") == 0)
+    {
+        // lowest channel the EU build transmits on (868: 863.800 MHz, see EuGuard)
         out->channel = 0;
+        while (out->channel + 1 < count && !labChannelTxAllowed(out->band, out->channel))
+            out->channel++;
+    }
     else if (strcmp(t, "mid") == 0)
         out->channel = count / 2;
     else if (strcmp(t, "high") == 0)
     {
-        // highest channel the EU build transmits on (868: 868.000 MHz, see EuGuard)
+        // highest channel the EU build transmits on (868: 867.475 MHz, see EuGuard)
         out->channel = count - 1;
         while (out->channel > 0 && !labChannelTxAllowed(out->band, out->channel))
             out->channel--;
@@ -252,7 +259,7 @@ void labParse(const char *line, LabModel model, LabCmd *out)
     }
 
     const char *c = tok[0];
-    if (strcmp(c, "info") == 0 || strcmp(c, "stop") == 0)
+    if (strcmp(c, "info") == 0 || strcmp(c, "stop") == 0 || strcmp(c, "wifi") == 0)
     {
         if (n != 1)
         {
@@ -260,7 +267,7 @@ void labParse(const char *line, LabModel model, LabCmd *out)
             out->type = LAB_CMD_ERR;
             return;
         }
-        out->type = c[0] == 'i' ? LAB_CMD_INFO : LAB_CMD_STOP;
+        out->type = c[0] == 'i' ? LAB_CMD_INFO : (c[0] == 's' ? LAB_CMD_STOP : LAB_CMD_WIFI);
         return;
     }
     if (strcmp(c, "cw") == 0)
@@ -339,7 +346,7 @@ void labParse(const char *line, LabModel model, LabCmd *out)
         out->type = LAB_CMD_LINK_TX;
         return;
     }
-    snprintf(out->err, sizeof(out->err), "unknown command %s (info, cw, tx, rx, ref, link, stop)", c);
+    snprintf(out->err, sizeof(out->err), "unknown command %s (info, cw, tx, rx, ref, link, wifi, stop)", c);
     out->type = LAB_CMD_ERR;
 }
 

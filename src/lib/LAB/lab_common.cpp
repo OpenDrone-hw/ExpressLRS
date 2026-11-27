@@ -80,6 +80,7 @@ void labPrintErr(const char *msg)
     Serial.printf("ERR %s\r\n", msg);
 }
 
+#if defined(RADIO_LR1121)
 static void domainName(char *out, size_t len, const char *elrs)
 {
     // "EU868" -> "EU_868"
@@ -92,6 +93,7 @@ static void domainName(char *out, size_t len, const char *elrs)
     }
     out[o] = '\0';
 }
+#endif
 
 void labPrintInfo()
 {
@@ -131,6 +133,7 @@ void labPrintInfo()
 
 static const char *NVS_NS = "orxlab";
 static const char *NVS_KEY = "cmd";
+static const char *NVS_MODE = "mode";
 
 void labMailboxPut(const char *line)
 {
@@ -142,21 +145,59 @@ void labMailboxPut(const char *line)
     }
 }
 
-bool labMailboxTake(char *line, size_t len)
+bool labBootCommand(char *line, size_t len)
 {
     line[0] = '\0';
     Preferences p;
     if (!p.begin(NVS_NS, false))
         return false;
-    String s = p.getString(NVS_KEY, "");
-    if (s.length())
+    String cmd = p.getString(NVS_KEY, "");
+    if (cmd.length())
         p.remove(NVS_KEY);
+    String mode = p.getString(NVS_MODE, "");
+    String use;
+    switch (esp_reset_reason())
+    {
+    case ESP_RST_SW: // our own restart: the stored command
+        use = cmd;
+        break;
+    case ESP_RST_BROWNOUT: // supply dip, ESD, watchdog, crash: resume the link
+    case ESP_RST_PANIC:
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:
+        use = mode;
+        break;
+    default: // power-up, reset pin, unknown: idle
+        if (mode.length())
+            p.remove(NVS_MODE);
+        break;
+    }
     p.end();
-    // Only a software reset carries a command; power-up is always idle
-    if (esp_reset_reason() != ESP_RST_SW || s.length() == 0)
+    if (use.length() == 0)
         return false;
-    strlcpy(line, s.c_str(), len);
+    strlcpy(line, use.c_str(), len);
     return true;
+}
+
+void labSetResumeMode(const char *line)
+{
+    Preferences p;
+    if (!p.begin(NVS_NS, false))
+        return;
+    if (line[0])
+    {
+        if (p.getString(NVS_MODE, "") != line)
+            p.putString(NVS_MODE, line);
+    }
+    else if (p.isKey(NVS_MODE))
+        p.remove(NVS_MODE);
+    p.end();
+}
+
+bool labWifiRequested()
+{
+    return labState == LAB_STATE_WIFI;
 }
 
 bool labSelectApp(bool txApp)
@@ -177,6 +218,7 @@ void labRestartWith(const char *line, bool txApp)
         labPrintErr(txApp ? "transmitter application missing in this image" : "receiver application missing in this image");
         return;
     }
+    labSetResumeMode(""); // the next application sets it again for a link mode
     labMailboxPut(line);
     Serial.flush();
     delay(10);
@@ -192,6 +234,7 @@ uint32_t labLedColour(uint32_t nowMs)
     constexpr uint32_t BLUE = 0x000080;
     constexpr uint32_t ORANGE = 0x802000;
     constexpr uint32_t GREEN = 0x008000;
+    constexpr uint32_t MAGENTA = 0x600060;
 
     if (connectionState == radioFailed || connectionState == hardwareUndefined)
         return (nowMs / 100) % 2 ? RED : 0; // fast flash
@@ -203,6 +246,8 @@ uint32_t labLedColour(uint32_t nowMs)
         return RED;
     case LAB_STATE_RX:
         return BLUE;
+    case LAB_STATE_WIFI:
+        return MAGENTA;
     case LAB_STATE_LINK_RX:
     case LAB_STATE_LINK_TX:
         if (connectionState == connected)

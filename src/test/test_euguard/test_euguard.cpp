@@ -17,10 +17,12 @@ void test_868_channel_classes(void)
 {
     // Stock EU868 plan: 863.275 + n * 0.525 MHz
     const EuBand868 expect[13] = {
-        EU868_DUTY_0P1PCT, EU868_DUTY_0P1PCT, EU868_DUTY_0P1PCT, // 863.275 863.800 864.325
+        EU868_EXCLUDED,                                          // 863.275: 25 kHz from 863.0
+        EU868_DUTY_0P1PCT, EU868_DUTY_0P1PCT,                    // 863.800 864.325
         EU868_DUTY_0P1PCT,                                       // 864.850 straddles 865.0
         EU868_DUTY_1PCT, EU868_DUTY_1PCT, EU868_DUTY_1PCT,       // 865.375 865.900 866.425
-        EU868_DUTY_1PCT, EU868_DUTY_1PCT, EU868_DUTY_1PCT,       // 866.950 867.475 868.000
+        EU868_DUTY_1PCT, EU868_DUTY_1PCT,                        // 866.950 867.475
+        EU868_EXCLUDED,                                          // 868.000 straddles 868.0
         EU868_EXCLUDED,                                          // 868.525 overlaps 868.6-868.7
         EU868_EXCLUDED,                                          // 869.050 overlaps 869.2-869.4
         EU868_EXCLUDED,                                          // 869.575 overlaps 869.65-869.7
@@ -32,8 +34,10 @@ void test_868_channel_classes(void)
         TEST_ASSERT_EQUAL_MESSAGE(expect[n], euGuardBand868(863275000UL + n * 525000UL), msg);
     }
     TEST_ASSERT_EQUAL(EU868_EXCLUDED, euGuardBand868(862900000UL)); // below 863.0
-    TEST_ASSERT_EQUAL(EU868_EXCLUDED, euGuardBand868(868400000UL)); // 868.15 to 868.65
-    TEST_ASSERT_EQUAL(EU868_DUTY_1PCT, euGuardBand868(868350000UL)); // 868.10 to 868.60
+    TEST_ASSERT_EQUAL(EU868_EXCLUDED, euGuardBand868(863340000UL));  // 863.09: inside the edge guard
+    TEST_ASSERT_EQUAL(EU868_DUTY_0P1PCT, euGuardBand868(863350000UL)); // 863.10 to 863.60
+    TEST_ASSERT_EQUAL(EU868_EXCLUDED, euGuardBand868(867760000UL));  // 867.51 to 868.01
+    TEST_ASSERT_EQUAL(EU868_DUTY_1PCT, euGuardBand868(867750000UL)); // 867.50 to 868.00
 }
 
 void test_868_excluded_never_sends(void)
@@ -52,30 +56,35 @@ void test_868_outside_rules_not_limited(void)
 void test_868_duty_bucket(void)
 {
     const uint32_t f1 = 866425000UL;  // 1 % band
-    const uint32_t f01 = 863275000UL; // 0.1 % band
-    // Burst capacity first
-    uint64_t t = 0;
+    const uint32_t f01 = 863800000UL; // 0.1 % band
+    // Empty at boot: nothing may be sent at once, so power cycling adds nothing
+    uint64_t t = 5000000ULL;
     uint32_t sent = 0;
     while (euGuardTx(&g, t, true, 0, f1, 1000) == EU_GUARD_OK)
         sent++;
-    TEST_ASSERT_EQUAL(EU868_DUTY_1PCT_CAPACITY_US / 1000, sent);
-    // The 0.1 % band has its own, smaller budget
+    TEST_ASSERT_EQUAL(0, sent);
+    TEST_ASSERT_EQUAL(EU_GUARD_DUTY, euGuardTx(&g, t, true, 0, f01, 1000));
+    // Refill: 0.9 % of 10 s = 90 ms -> 90 packets of 1 ms
+    t += 10000000ULL;
     sent = 0;
     while (euGuardTx(&g, t, true, 0, f01, 1000) == EU_GUARD_OK)
         sent++;
-    TEST_ASSERT_EQUAL(EU868_DUTY_0P1PCT_CAPACITY_US / 1000, sent);
-    // Refill: 0.9 % of 10 s = 90 ms -> 90 packets of 1 ms
+    TEST_ASSERT_EQUAL(9, sent); // 0.09 % of 10 s
     t += 10000000ULL;
     sent = 0;
     while (euGuardTx(&g, t, true, 0, f1, 1000) == EU_GUARD_OK)
         sent++;
-    TEST_ASSERT_EQUAL(90, sent);
+    TEST_ASSERT_EQUAL(180, sent); // the 1 % band was not used: 0.9 % of 20 s
     // Refill is capped at the capacity
     t += 10ULL * 3600ULL * 1000000ULL;
     sent = 0;
     while (euGuardTx(&g, t, true, 0, f1, 1000) == EU_GUARD_OK)
         sent++;
     TEST_ASSERT_EQUAL(EU868_DUTY_1PCT_CAPACITY_US / 1000, sent);
+    sent = 0;
+    while (euGuardTx(&g, t, true, 0, f01, 1000) == EU_GUARD_OK)
+        sent++;
+    TEST_ASSERT_EQUAL(EU868_DUTY_0P1PCT_CAPACITY_US / 1000, sent);
 }
 
 void test_2g4_dwell_budget(void)

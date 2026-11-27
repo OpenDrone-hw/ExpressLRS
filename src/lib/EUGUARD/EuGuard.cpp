@@ -41,8 +41,9 @@ static void ICACHE_RAM_ATTR refill(EuGuard *g, uint64_t nowUs)
     {
         g->initialised = true;
         g->lastRefillUs = nowUs;
-        g->duty[EU868_DUTY_0P1PCT].tokens = capacityOf(EU868_DUTY_0P1PCT);
-        g->duty[EU868_DUTY_1PCT].tokens = capacityOf(EU868_DUTY_1PCT);
+        // Empty at boot: a reset never adds budget
+        g->duty[EU868_DUTY_0P1PCT].tokens = 0;
+        g->duty[EU868_DUTY_1PCT].tokens = 0;
         return;
     }
     if (nowUs <= g->lastRefillUs)

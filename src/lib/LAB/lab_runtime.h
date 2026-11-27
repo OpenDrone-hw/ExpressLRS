@@ -10,7 +10,8 @@
  * A command that needs the other application, or that leaves a link mode, is
  * stored in NVS and the board restarts into the right application, which
  * executes it. The stored command is honoured only after a software reset,
- * so a power-up always starts idle in app0.
+ * so a power-up always starts idle in app0. After a brownout, watchdog or
+ * panic reset the last link mode (link rx / link tx) resumes by itself.
  */
 
 #if defined(OPENRX_LAB) && !defined(UNIT_TEST)
@@ -34,6 +35,7 @@ enum LabState : uint8_t
     LAB_STATE_REF,
     LAB_STATE_LINK_RX,
     LAB_STATE_LINK_TX,
+    LAB_STATE_WIFI,
 };
 
 extern volatile LabState labState;
@@ -45,7 +47,11 @@ bool labReadLine(char *buf, size_t len); // non-blocking, true when a line is co
 void labPrintInfo();
 void labPrintErr(const char *msg);
 void labMailboxPut(const char *line);
-bool labMailboxTake(char *line, size_t len);
+// The command to run at boot: the stored command after a software reset, the
+// last link mode after a brownout/watchdog/panic reset, nothing at power-up
+bool labBootCommand(char *line, size_t len);
+void labSetResumeMode(const char *line); // "" clears
+bool labWifiRequested();
 bool labSelectApp(bool txApp);
 // Store the command and restart into the application; returns only on failure
 void labRestartWith(const char *line, bool txApp);

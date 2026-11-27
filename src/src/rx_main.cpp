@@ -463,18 +463,23 @@ EuGuard euTlmGuard;
 // the current channel?
 static bool ICACHE_RAM_ATTR euTlmGuardAllows()
 {
-    const uint32_t freq = Radio.currFreq; // set by HandleFHSS() just before
+    // Channel of this slot (HandleFHSS() has just hopped). Keyed on the FHSS
+    // channel index, so frequency correction never splits one channel's history.
 #if defined(RADIO_LR1121)
-    const bool subGHz = freq < 1000000000; // LR1121 register value is in Hz
+    const bool subGHz = FHSSusePrimaryFreqBand; // primary band: EU868 on LR1121
 #else
     const bool subGHz = false;
 #endif
+    const uint8_t channel = FHSSusePrimaryFreqBand ? FHSSsequence[FHSSptr] : FHSSsequence_DualBand[FHSSptr];
+    const fhss_config_t *domain = FHSSusePrimaryFreqBand ? FHSSconfig : FHSSconfigDualBand;
+    // Nominal centre frequency in Hz (only used for the 868 MHz rules; LR1121 registers are in Hz)
+    const uint32_t freqHz = domain->freq_start + (uint32_t)((uint64_t)(domain->freq_stop - domain->freq_start) * channel / (domain->freq_count - 1));
 #if defined(PLATFORM_ESP32)
     const uint64_t now = esp_timer_get_time();
 #else
     const uint64_t now = micros64();
 #endif
-    return euGuardTx(&euTlmGuard, now, subGHz, freq, freq, ExpressLRS_currAirRate_RFperfParams->TOA) == EU_GUARD_OK;
+    return euGuardTx(&euTlmGuard, now, subGHz, channel, freqHz, ExpressLRS_currAirRate_RFperfParams->TOA) == EU_GUARD_OK;
 }
 #endif
 

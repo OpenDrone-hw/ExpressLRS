@@ -97,6 +97,21 @@ static const char VERSION[] = {LATEST_VERSION, 0};
 // products: 8.5 dBm, about 9 dBm e.i.r.p. with the 0.5 dBi chip antenna.
 #define WIFI_TX_POWER WIFI_POWER_8_5dBm
 
+#if defined(OPENRX_LAB)
+#include "lab_runtime.h"
+#endif
+
+// Wi-Fi may start: in the lab image only on the "wifi" command, never on
+// its own (radio fault, missing layout, button, auto interval, MSP)
+static bool wifiAllowed()
+{
+#if defined(OPENRX_LAB)
+  return labWifiRequested();
+#else
+  return true;
+#endif
+}
+
 void setWifiUpdateMode()
 {
   // No need to ExitBindingMode(), the radio will be stopped stopped when start the Wifi service.
@@ -172,7 +187,7 @@ static void WebUpdateHandleRoot(AsyncWebServerRequest *request)
   }
 }
 
-static void putFile(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+[[maybe_unused]] static void putFile(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
 {
   static File file;
   static size_t bytes;
@@ -1124,7 +1139,12 @@ static void startServices()
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
 
+#if defined(Regulatory_Domain_EU_CE_2400)
+  // EU build: the layout (power table) cannot be replaced in the field
+  server.on("/hardware.json", HTTP_GET, getFile);
+#else
   server.on("/hardware.json", HTTP_GET | HTTP_POST, getFile, nullptr, putFile);
+#endif
   server.on("/options.json", HTTP_GET, getFile);
   server.on("/reboot", HandleReboot);
   server.on("/reset", HandleReset);
@@ -1203,6 +1223,13 @@ static void HandleWebUpdate()
         wifiMode = WIFI_AP;
         #if defined(PLATFORM_ESP32)
         WiFi.setHostname(wifi_hostname); // hostname must be set before the mode is set to STA
+        // arduino-esp32 2.0.17: mode() calls esp_wifi_start(), and an AP
+        // beacons from that moment; esp_wifi_set_max_tx_power() only works
+        // after start. So start as a station first (a station sends nothing
+        // until it scans or connects), limit the power, then switch the
+        // running driver to AP mode with the limit already in place.
+        WiFi.mode(WIFI_STA);
+        WiFi.setTxPower(WIFI_TX_POWER);
         #endif
         WiFi.mode(wifiMode);
         #if defined(PLATFORM_ESP8266)
@@ -1278,6 +1305,10 @@ static int start()
 
 static int event()
 {
+  if (!wifiAllowed())
+  {
+    return DURATION_IGNORE;
+  }
   if (connectionState == wifiUpdate || connectionState > FAILURE_STATES)
   {
     if (!wifiStarted) {
@@ -1299,6 +1330,10 @@ static int event()
 
 static int timeout()
 {
+  if (!wifiAllowed())
+  {
+    return DURATION_NEVER;
+  }
   if (wifiStarted)
   {
     HandleWebUpdate();

@@ -24,7 +24,7 @@ static bool linkValid;
 void labTxBootCheck()
 {
     char line[LAB_LINE_MAX + 1];
-    const bool have = labMailboxTake(line, sizeof(line));
+    const bool have = labBootCommand(line, sizeof(line));
     if (have)
         labParse(line, labThisModel(), &linkCmd);
     if (have && linkCmd.type == LAB_CMD_LINK_TX)
@@ -32,6 +32,7 @@ void labTxBootCheck()
         strlcpy(linkLine, line, sizeof(linkLine));
         linkValid = true;
         labState = LAB_STATE_LINK_TX;
+        labSetResumeMode(line); // resume after a brownout or watchdog reset
         return;
     }
     // Power-up, or anything but link tx: back to the receiver application
@@ -67,6 +68,14 @@ public:
         if (!linkValid)
         {
             labPrintErr("receiver application missing in this image");
+            return;
+        }
+        if (connectionState == radioFailed || connectionState == hardwareUndefined)
+        {
+            linkValid = false; // never transmit, never resume this mode
+            labState = LAB_STATE_IDLE;
+            labSetResumeMode("");
+            labPrintErr(connectionState == radioFailed ? "radio not found" : "hardware layout missing");
             return;
         }
         Serial.printf("OK link tx %s tlm 1:%u power ", linkCmd.rate->name, linkCmd.tlm);

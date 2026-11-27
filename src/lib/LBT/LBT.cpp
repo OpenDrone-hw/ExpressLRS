@@ -72,7 +72,14 @@ static uint32_t SpreadingFactorToRSSIvalidDelayUs(uint8_t SF, uint8_t radio_type
 
 void LbtEnableIfRequired()
 {
+#if defined(TARGET_RX)
+    // EU receiver: non-adaptive. Telemetry access is limited by lib/EUGUARD,
+    // never by listen before talk (the stored Tlm Power, e.g. MatchTX = 8,
+    // would otherwise switch LBT on).
+    LbtIsEnabled = false;
+#else
     LbtIsEnabled = config.GetPower() > PWR_10mW;
+#endif
 #if defined(RADIO_LR1121)
     LbtIsEnabled = LbtIsEnabled && (ExpressLRS_currAirRate_Modparams->radio_type == RADIO_TYPE_LR1121_LORA_2G4 || ExpressLRS_currAirRate_Modparams->radio_type == RADIO_TYPE_LR1121_GFSK_2G4 || ExpressLRS_currAirRate_Modparams->radio_type == RADIO_TYPE_LR1121_LORA_DUAL);
 #endif

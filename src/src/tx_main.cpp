@@ -20,7 +20,9 @@
 #include "devVTX.h"
 #if defined(PLATFORM_ESP32)
 #include "devScreen.h"
+#if !defined(OPENRX_LAB)
 #include "devBLE.h"
+#endif
 #include "devGsensor.h"
 #include "devThermal.h"
 #include "devPDET.h"
@@ -111,7 +113,9 @@ device_affinity_t ui_devices[] = {
   {&Button_device, 0},
 #if defined(PLATFORM_ESP32)
   {&Backpack_device, 0},
+#if !defined(OPENRX_LAB)
   {&BLE_device, 0},
+#endif
 #if !defined(PLATFORM_ESP32_C3)
   {&Screen_device, 0},
   {&Gsensor_device, 0},
